@@ -9,8 +9,8 @@
 
 // ================= CẤU HÌNH CHÂN PHẦN CỨNG =================
 
-#define TRIG1_PIN 12 // Cảm biến 1 (Vạch 1)
-#define ECHO1_PIN 13
+#define TRIG1_PIN 1 // Cảm biến 1 (Vạch 1)
+#define ECHO1_PIN 2
 
 
 #define TRIG2_PIN 38 // Cảm biến 2 (Vạch 2)
@@ -148,45 +148,48 @@ void reconnectMQTT() {
 // Task chạy ngầm chuyên xử lý Sensor và MQTT
 void sensorTask(void * parameter) {
   for(;;) {
-    if (!client.connected()) {
-      reconnectMQTT();
-    }
-    client.loop(); // Duy trì kết nối MQTT
+    // if (!client.connected()) {
+    //   reconnectMQTT();
+    // }
+    // client.loop(); // Duy trì kết nối MQTT
 
     unsigned long currentTime = millis();
 
     // 1. Kiểm tra Vạch 1
     if (currentTime - lastTriggerTime1 > triggerDelay) {
       float dist1 = getDistance(TRIG1_PIN, ECHO1_PIN);
-      if (dist1 < DISTANCE_THRESHOLD) {
-        Serial.printf("VẠCH 1: Có xe! Khoảng cách: %.1f cm\n", dist1);
+      Serial.printf("VẠCH 1: Khoảng cách: %.1f cm\n", dist1);
+      // if (dist1 < DISTANCE_THRESHOLD) {
+      //   Serial.printf("VẠCH 1: Có xe! Khoảng cách: %.1f cm\n", dist1);
         
         // Tạo chuỗi JSON gửi đi
         char msg[50];
         snprintf(msg, 50, "{\"gate\":1, \"timestamp\":%lu}", currentTime);
-        client.publish("sensor/trigger", msg);
+        // client.publish("sensor/trigger", msg);
         
         lastTriggerTime1 = currentTime;
-      }
+      
     }
 
     // 2. Kiểm tra Vạch 2
-    if (currentTime - lastTriggerTime2 > triggerDelay) {
-      float dist2 = getDistance(TRIG2_PIN, ECHO2_PIN);
-      if (dist2 < DISTANCE_THRESHOLD) {
-        Serial.printf("VẠCH 2: Có xe! Khoảng cách: %.1f cm\n", dist2);
+    // if (currentTime - lastTriggerTime2 > triggerDelay) {
+    //   float dist2 = getDistance(TRIG2_PIN, ECHO2_PIN);
+    //   if (dist2 < DISTANCE_THRESHOLD) {
+    //     Serial.printf("VẠCH 2: Có xe! Khoảng cách: %.1f cm\n", dist2);
         
-        char msg[50];
-        snprintf(msg, 50, "{\"gate\":2, \"timestamp\":%lu}", currentTime);
-        client.publish("sensor/trigger", msg);
+    //     char msg[50];
+    //     snprintf(msg, 50, "{\"gate\":2, \"timestamp\":%lu}", currentTime);
+    //     client.publish("sensor/trigger", msg);
         
-        lastTriggerTime2 = currentTime;
-      }
-    }
+    //     lastTriggerTime2 = currentTime;
+    //   }
+    // }
 
     vTaskDelay(50 / portTICK_PERIOD_MS); // Quét mỗi 50ms để không chiếm dụng CPU
+    }
   }
-}
+
+
 
 
 
@@ -243,30 +246,30 @@ void setup()
   // checkHardwareFPS();
 
   // Kết nối WiFi (Station Mode)
-  WiFi.mode(WIFI_STA); 
-  WiFi.setSleep(false); 
+  // WiFi.mode(WIFI_STA); 
+  // WiFi.setSleep(false); 
   
-  Serial.printf("\nĐang kết nối vào Router WiFi: %s ", ssid);
-  if (strlen(password) > 0) {
-    WiFi.begin(ssid, password);
-  } else {
-    WiFi.begin(ssid);
-  }
+  // Serial.printf("\nĐang kết nối vào Router WiFi: %s ", ssid);
+  // if (strlen(password) > 0) {
+  //   WiFi.begin(ssid, password);
+  // } else {
+  //   WiFi.begin(ssid);
+  // }
 
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
+  // while (WiFi.status() != WL_CONNECTED) {
+  //   delay(500);
+  //   Serial.print(".");
+  // }
 
-  IPAddress ip = WiFi.localIP(); 
-  Serial.printf("\nKết nối WiFi thành công! IP của Camera là: %s\n", ip.toString().c_str());
+  // IPAddress ip = WiFi.localIP(); 
+  // Serial.printf("\nKết nối WiFi thành công! IP của Camera là: %s\n", ip.toString().c_str());
 
-  startCameraServer();  
+  // startCameraServer();  
 
 
   
-  client.setServer(mqtt_server, mqtt_port);
-  client.setCallback(mqttCallback);
+  // client.setServer(mqtt_server, mqtt_port);
+  // client.setCallback(mqttCallback);
 
 // Tạo một Task riêng cho Sensor chạy trên Core 1 (Core 0 chạy Camera và WiFi)
   xTaskCreatePinnedToCore(
@@ -282,7 +285,7 @@ void setup()
 
   Serial.println("\n============ HƯỚNG DẪN CHẠY PYTHON ============");
   Serial.printf("Copy dòng dưới đây dán vào Terminal của máy tính:\n\n");
-  Serial.printf("python D:\\CURSOR\\iot\\demo_CAM.py --weights D:\\CURSOR\\iot\\runs\\detect\\runs\\vehicle_detection-16\\weights\\best.pt --source http://%s:81/stream --conf 0.55\n", ip.toString().c_str());
+  // Serial.printf("python D:\\CURSOR\\iot\\demo_CAM.py --weights D:\\CURSOR\\iot\\runs\\detect\\runs\\vehicle_detection-16\\weights\\best.pt --source http://%s:81/stream --conf 0.55\n", ip.toString().c_str());
   Serial.println("\n===============================================");
 }
 

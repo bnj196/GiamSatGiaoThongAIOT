@@ -17,19 +17,19 @@
 #define ECHO2_PIN 42
 
 
-#define LED_GREEN_1 2 // Đèn LED Cổng 1 & 2
-#define LED_RED_1   4
-#define LED_GREEN_2 5
-#define LED_RED_2   6
+// #define LED_GREEN_1 2 // Đèn LED Cổng 1 & 2
+// #define LED_RED_1   4
+// #define LED_GREEN_2 5
+// #define LED_RED_2   6
 
 // Ngưỡng khoảng cách phát hiện xe (đơn vị: cm)
-#define DISTANCE_THRESHOLD 10.0 
+#define DISTANCE_THRESHOLD 20.0 
 
 
 
 
 // ================= CẤU HÌNH MQTT SERVER =================
-const char* mqtt_server =  "10.3.1.64";//"172.20.10.5"; // THAY BẰNG IP CỦA MÁY TÍNH CHẠY PYTHON SERVER
+const char* mqtt_server =  "10.3.6.117";//"172.20.10.5"; // THAY BẰNG IP CỦA MÁY TÍNH CHẠY PYTHON SERVER
 const int mqtt_port = 1883;
 
 WiFiClient espClient;
@@ -45,7 +45,7 @@ const int triggerDelay = 2000; // Nghỉ 2 giây sau khi bắt được 1 xe
 
 
 // ================= ĐIỀN WIFI NHÀ BẠN =================
-const char *ssid = "NTU Hall"; 
+const char *ssid = "NH K7 P408-2.4G"; // THAY BẰNG TÊN WIFI NHÀ BẠN
 const char *password = "";            
 // =====================================================
 
@@ -150,10 +150,10 @@ void reconnectMQTT() {
 // Task chạy ngầm chuyên xử lý Sensor và MQTT
 void sensorTask(void * parameter) {
   for(;;) {
-    // if (!client.connected()) {
-    //   reconnectMQTT();
-    // }
-    // client.loop(); // Duy trì kết nối MQTT
+    if (!client.connected()) {
+      reconnectMQTT();
+    }
+    client.loop(); // Duy trì kết nối MQTT
 
     unsigned long currentTime =  millis();
 
@@ -223,12 +223,12 @@ void setup()
   config.pin_reset = RESET_GPIO_NUM;
   
   // HẠ XUNG NHỊP XUỐNG 14MHz ĐỂ CHỐNG LỖI 0 FPS
-  config.xclk_freq_hz = 15000000; 
-  config.frame_size = FRAMESIZE_CIF; 
+  config.xclk_freq_hz = 17000000; 
+  config.frame_size = FRAMESIZE_VGA; 
   config.pixel_format = PIXFORMAT_JPEG;
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
   config.fb_location = CAMERA_FB_IN_PSRAM;
-  config.jpeg_quality = 12; 
+  config.jpeg_quality = 20; 
   config.fb_count = 1;
 
   if (psramFound()) {
@@ -258,10 +258,10 @@ void setup()
     WiFi.begin(ssid);
   }
 
-  // while (WiFi.status() != WL_CONNECTED) {
-  //   delay(500);
-  //   Serial.print(".");
-  // }
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
 
   IPAddress ip = WiFi.localIP(); 
   Serial.printf("\nKết nối WiFi thành công! IP của Camera là: %s\n", ip.toString().c_str());

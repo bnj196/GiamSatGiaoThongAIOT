@@ -22,6 +22,7 @@
 #define LED_GREEN_2 5
 #define LED_RED_2   6
 
+
 // Ngưỡng khoảng cách phát hiện xe (đơn vị: cm)
 #define DISTANCE_THRESHOLD 10.0 
 

@@ -1,101 +1,59 @@
 #include "esp_camera.h"
 #include <WiFi.h>
-#include <PubSubClient.h> 
+#include <WiFiUdp.h> // Thay thế thư viện MQTT
 #define CAMERA_MODEL_ESP32S3_EYE
 #include "camera_pins.h"
 
-
-
-
 // ================= CẤU HÌNH CHÂN PHẦN CỨNG =================
-
 #define TRIG1_PIN 1 // Cảm biến 1 (Vạch 1)
 #define ECHO1_PIN 2
-
 
 #define TRIG2_PIN 41 // Cảm biến 2 (Vạch 2)
 #define ECHO2_PIN 42
 
-
-// #define LED_GREEN_1 2 // Đèn LED Cổng 1 & 2
-// #define LED_RED_1   4
+#define LED_GREEN_1 21 // Đèn LED Cổng 1 & 2
+#define LED_RED_1   47
 // #define LED_GREEN_2 5
 // #define LED_RED_2   6
 
-// Ngưỡng khoảng cách phát hiện xe (đơn vị: cm)
-#define DISTANCE_THRESHOLD 20.0 
+#define DISTANCE_THRESHOLD 30
 
+// ================= CẤU HÌNH UDP SOCKET =================
+const char* server_ip = "10.3.6.117"; // IP MÁY TÍNH CHẠY PYTHON
+const int server_port = 5005;         // Port máy tính lắng nghe
+const int local_udp_port = 5006;      // Port ESP32 lắng nghe lệnh bật đèn
 
+WiFiUDP udp;
 
-
-// ================= CẤU HÌNH MQTT SERVER =================
-const char* mqtt_server =  "10.3.6.117";//"172.20.10.5"; // THAY BẰNG IP CỦA MÁY TÍNH CHẠY PYTHON SERVER
-const int mqtt_port = 1883;
-
-WiFiClient espClient;
-PubSubClient client(espClient);
-
-// Biến chống dội (Debounce) để không gửi liên tục 1 xe
 unsigned long lastTriggerTime1 = 0;
 unsigned long lastTriggerTime2 = 0;
-const int triggerDelay = 2000; // Nghỉ 2 giây sau khi bắt được 1 xe
-
-
-
-
+const int triggerDelay = 2000; 
 
 // ================= ĐIỀN WIFI NHÀ BẠN =================
-const char *ssid = "NH K7 P408-2.4G"; // THAY BẰNG TÊN WIFI NHÀ BẠN
+const char *ssid = "NH K7 P408-2.4G"; 
 const char *password = "";            
 // =====================================================
 
-void startCameraServer(); // Hàm từ app_httpd.cpp
+// --- Thêm 2 biến này vào phần khai báo biến toàn cục ---
+unsigned long ledOnTime = 0;   // Lưu thời điểm bật đèn
+bool isLedActive = false;      // Cờ trạng thái đèn đang sáng
+const int ledTimeout = 3000;   // Thời gian sáng đèn (1000ms = 1s)
 
-void checkHardwareFPS() {
-  Serial.println("\n--- ĐANG KIỂM TRA TỐC ĐỘ FPS PHẦN CỨNG CAMERA ---");
-  unsigned long start_time = millis();
-  int frames_to_test = 50; 
-  int successful_frames = 0;
 
-  for (int i = 0; i < frames_to_test; i++) {
-    camera_fb_t *fb = esp_camera_fb_get(); 
-    if (fb) {
-      successful_frames++;
-      esp_camera_fb_return(fb); 
-    } else {
-      Serial.print("x "); // In dấu x nếu trượt frame
-    }
-  }
+void startCameraServer(); 
 
-  unsigned long end_time = millis();
-  float time_taken_s = (end_time - start_time) / 1000.0;
-  float fps = (time_taken_s > 0) ? (successful_frames / time_taken_s) : 0;
-
-  Serial.printf("\n-> Đã chụp %d frames trong %.2f giây.\n", successful_frames, time_taken_s);
-  Serial.printf("-> TỐC ĐỘ CAM HARDWARE: %.2f FPS\n", fps);
-  Serial.println("---------------------------------------------------\n");
-}
-
-// Hàm khởi tạo các chân In/Out
 void initHardware() {
   pinMode(TRIG1_PIN, OUTPUT);
   pinMode(ECHO1_PIN, INPUT);
   pinMode(TRIG2_PIN, OUTPUT);
   pinMode(ECHO2_PIN, INPUT);
 
-  // pinMode(LED_GREEN_1, OUTPUT);
-  // pinMode(LED_RED_1, OUTPUT);
+  pinMode(LED_GREEN_1, OUTPUT);
+  pinMode(LED_RED_1, OUTPUT);
   // pinMode(LED_GREEN_2, OUTPUT);
   // pinMode(LED_RED_2, OUTPUT);
-
-  // Tắt toàn bộ đèn ban đầu
-  // digitalWrite(LED_GREEN_1, LOW);
-  // digitalWrite(LED_RED_1, LOW);
-  // digitalWrite(LED_GREEN_2, LOW);
-  // digitalWrite(LED_RED_2, LOW);
 }
 
-// Hàm đo khoảng cách của HC-SR05
 float getDistance(int trigPin, int echoPin) {
   digitalWrite(trigPin, LOW);
   delayMicroseconds(2);
@@ -103,97 +61,107 @@ float getDistance(int trigPin, int echoPin) {
   delayMicroseconds(10);
   digitalWrite(trigPin, LOW);
 
-  // Đọc thời gian xung vọng lại (timeout 30000us ~ 5m để không bị treo)
-  long duration = pulseIn(echoPin, HIGH, 30000);
-  if (duration == 0) return 999.0; // Không thấy vật cản
+  // Giữ timeout ở mức 6000us để chống treo Camera (Camera capture failed)
+  long duration = pulseIn(echoPin, HIGH, 6000);
+  if (duration == 0) return 999.0; 
   
-  return (duration * 0.0343) / 2.0; // Tính ra cm
+  return (duration * 0.0343) / 2.0; 
 }
 
 
-// Hàm xử lý khi nhận được lệnh bật đèn từ Server
-void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  String message = "";
-  for (int i = 0; i < length; i++) {
-    message += (char)payload[i];
-  }
-  Serial.println("Nhận lệnh từ Server: " + message);
-
-  // Logic đơn giản: Server gửi "VIOLATION" hoặc "NORMAL"
-  if (message == "VIOLATION") {
-    Serial.println("Lệnh: VIOLATION - XE qua toc do  cho phep! BẬT ĐÈN ĐỎ");
-    // digitalWrite(LED_RED_2, HIGH);
-    // digitalWrite(LED_GREEN_2, LOW);
-  } else if (message == "NORMAL") {
-    Serial.println("Lệnh: NORMAL - XE ĐÚNG TỐC ĐỘ! bat  den xanh ");
-    // digitalWrite(LED_GREEN_2, HIGH);
-    // digitalWrite(LED_RED_2, LOW);
-  }
-}
-
-// Hàm giữ kết nối MQTT
-void reconnectMQTT() {
-  while (!client.connected()) {
-    Serial.print("Đang kết nối MQTT...");
-    if (client.connect("ESP32_Camera_Node")) {
-      Serial.println(" Thành công!");
-      client.subscribe("server/led_control"); // Lắng nghe lệnh điều khiển đèn
-    } else {
-      Serial.print(" Lỗi, mã rc=");
-      Serial.print(client.state());
-      delay(2000);
-    }
-  }
-}
 
 
-// Task chạy ngầm chuyên xử lý Sensor và MQTT
+// Task chạy ngầm chuyên xử lý Sensor và UDP (Thế chỗ MQTT)
+
 void sensorTask(void * parameter) {
   for(;;) {
-    if (!client.connected()) {
-      reconnectMQTT();
-    }
-    client.loop(); // Duy trì kết nối MQTT
+    unsigned long currentTime = millis();
 
-    unsigned long currentTime =  millis();
-
-    // 1. Kiểm tra Vạch 1
+    // -------------------------------------------------------
+    // 1. KIỂM TRA VẠCH 1 (GATE 1)
+    // -------------------------------------------------------
     if (currentTime - lastTriggerTime1 > triggerDelay) {
       float dist1 = getDistance(TRIG1_PIN, ECHO1_PIN);
-      Serial.printf("VẠCH 1: Khoảng cách: %.1f cm\n", dist1);
       if (dist1 < DISTANCE_THRESHOLD) {
-        Serial.printf("VẠCH 1: Có xe! Khoảng cách: %.1f cm\n", dist1);
+        // Gửi chuỗi JSON qua UDP
+        char msg[64];
+        snprintf(msg, sizeof(msg), "{\"gate\":1, \"timestamp\":%lu}", currentTime);
         
-        // Tạo chuỗi JSON gửi đi
-        char msg[50];
-        snprintf(msg, 50, "{\"gate\":1, \"timestamp\":%lu}", currentTime);
-        client.publish("sensor/trigger", msg);
+        udp.beginPacket(server_ip, server_port);
+        udp.print(msg);
+        udp.endPacket();
         
+        Serial.printf("[S1] Xe đi qua - Khoảng cách: %.1f cm - Đã gửi UDP\n", dist1);
         lastTriggerTime1 = currentTime;
+        vTaskDelay(2 / portTICK_PERIOD_MS); // Nghỉ nhẹ để ổn định sóng âm
       }
     }
 
-    // 2. Kiểm tra Vạch 2
+    // -------------------------------------------------------
+    // 2. KIỂM TRA VẠCH 2 (GATE 2)
+    // -------------------------------------------------------
     if (currentTime - lastTriggerTime2 > triggerDelay) {
       float dist2 = getDistance(TRIG2_PIN, ECHO2_PIN);
       if (dist2 < DISTANCE_THRESHOLD) {
-        Serial.printf("VẠCH 2: Có xe! Khoảng cách: %.1f cm\n", dist2);
+        // Gửi chuỗi JSON qua UDP
+        char msg[64];
+        snprintf(msg, sizeof(msg), "{\"gate\":2, \"timestamp\":%lu}", currentTime);
         
-        char msg[50];
-        snprintf(msg, 50, "{\"gate\":2, \"timestamp\":%lu}", currentTime);
-        client.publish("sensor/trigger", msg);
+        udp.beginPacket(server_ip, server_port);
+        udp.print(msg);
+        udp.endPacket();
         
+        Serial.printf("[S2] Xe đi qua - Khoảng cách: %.1f cm - Đã gửi UDP\n", dist2);
         lastTriggerTime2 = currentTime;
+        vTaskDelay(2 / portTICK_PERIOD_MS);
       }
     }
 
-    vTaskDelay(50 / portTICK_PERIOD_MS); // Quét mỗi 50ms để không chiếm dụng CPU
+    // -------------------------------------------------------
+    // 3. NHẬN LỆNH TỪ SERVER & ĐIỀU KHIỂN ĐÈN
+    // -------------------------------------------------------
+    int packetSize = udp.parsePacket();
+    if (packetSize) {
+      char incomingPacket[128];
+      int len = udp.read(incomingPacket, sizeof(incomingPacket) - 1);
+      if (len > 0) {
+        incomingPacket[len] = '\0';
+        String message = String(incomingPacket);
+        message.trim();
+
+        if (message == "VIOLATION") {
+          Serial.println(">>> KẾT QUẢ: VIOLATION (Quá tốc độ) - Bật Đèn Đỏ");
+          digitalWrite(LED_RED_1, HIGH);
+          digitalWrite(LED_GREEN_1, LOW);
+          
+          ledOnTime = millis(); // Ghi lại thời điểm bắt đầu sáng đèn
+          isLedActive = true;
+        } 
+        else if (message == "NORMAL") {
+          Serial.println(">>> KẾT QUẢ: NORMAL (Đúng tốc độ) - Bật Đèn Xanh");
+          digitalWrite(LED_GREEN_1, HIGH);
+          digitalWrite(LED_RED_1, LOW);
+          
+          ledOnTime = millis(); // Ghi lại thời điểm bắt đầu sáng đèn
+          isLedActive = true;
+        }
+      }
     }
-  
 
+    // -------------------------------------------------------
+    // 4. LOGIC TỰ ĐỘNG RESET ĐÈN SAU 1 GIÂY (NON-BLOCKING)
+    // -------------------------------------------------------
+    if (isLedActive && (currentTime - ledOnTime >= ledTimeout)) {
+      digitalWrite(LED_RED_1, LOW);
+      digitalWrite(LED_GREEN_1, LOW);
+      isLedActive = false;
+      Serial.println("[Hệ thống] Reset đèn: Đã tắt sau 1s.");
+    }
 
+    // Nghỉ 20ms mỗi chu kỳ loop để nhường CPU cho các tác vụ khác của hệ điều hành
+    vTaskDelay(20 / portTICK_PERIOD_MS); 
+  }
 }
-
 
 void setup()
 {
@@ -203,8 +171,7 @@ void setup()
   initHardware();
 
   camera_config_t config;
-  // config.ledc_channel = LEDC_CHANNEL_0;
-  // config.ledc_timer = LEDC_TIMER_0;
+
   config.pin_d0 = Y2_GPIO_NUM;
   config.pin_d1 = Y3_GPIO_NUM;
   config.pin_d2 = Y4_GPIO_NUM;
@@ -222,13 +189,12 @@ void setup()
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   
-  // HẠ XUNG NHỊP XUỐNG 14MHz ĐỂ CHỐNG LỖI 0 FPS
   config.xclk_freq_hz = 17000000; 
-  config.frame_size = FRAMESIZE_VGA; 
+  config.frame_size = FRAMESIZE_SVGA; 
   config.pixel_format = PIXFORMAT_JPEG;
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
   config.fb_location = CAMERA_FB_IN_PSRAM;
-  config.jpeg_quality = 20; 
+  config.jpeg_quality = 13; 
   config.fb_count = 1;
 
   if (psramFound()) {
@@ -237,17 +203,12 @@ void setup()
     Serial.println("PSRAM OK - Dùng 2 Buffer.");
   }
 
-  // Khởi tạo Camera
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("LỖI KHỞI TẠO CAMERA! Mã lỗi: 0x%x\n", err);
     return; 
   }
 
-  // Test Camera ngay lập tức
-  // checkHardwareFPS();
-
-  // Kết nối WiFi (Station Mode)
   WiFi.mode(WIFI_STA); 
   WiFi.setSleep(false); 
   
@@ -268,22 +229,20 @@ void setup()
 
   startCameraServer();  
 
+  // Khởi tạo UDP Socket lắng nghe lệnh từ Server
+  udp.begin(local_udp_port);
+  Serial.printf("Đã mở UDP Socket trên Port %d\n", local_udp_port);
 
-  
-  client.setServer(mqtt_server, mqtt_port);
-  client.setCallback(mqttCallback);
-
-// Tạo một Task riêng cho Sensor chạy trên Core 1 (Core 0 chạy Camera và WiFi)
+  // Tạo một Task riêng cho Sensor chạy trên Core 0 (Cách ly khỏi Camera Stream ở Core 1)
   xTaskCreatePinnedToCore(
-    sensorTask,   // Tên hàm Task
-    "SensorTask", // Tên hiển thị (để debug)
-    4096,         // Kích thước RAM (Stack)
-    NULL,         // Tham số truyền vào
-    1,            // Mức ưu tiên (Priority)
-    NULL,         // Handle
-    1             // Chạy trên Core 1
+    sensorTask,   
+    "SensorTask", 
+    4096,         
+    NULL,         
+    1,            
+    NULL,         
+    0             // <-- Chạy trên Core 0
   );
-
 
   Serial.println("\n============ HƯỚNG DẪN CHẠY PYTHON ============");
   Serial.printf("Copy dòng dưới đây dán vào Terminal của máy tính:\n\n");

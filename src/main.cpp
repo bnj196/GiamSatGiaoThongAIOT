@@ -19,7 +19,7 @@
 #define DISTANCE_THRESHOLD 30
 
 // ================= CẤU HÌNH UDP SOCKET =================
-const char* server_ip = "10.3.6.117"; // IP MÁY TÍNH CHẠY PYTHON
+const char* server_ip = "172.20.10.5"; // IP MÁY TÍNH CHẠY PYTHON
 const int server_port = 5005;         // Port máy tính lắng nghe
 const int local_udp_port = 5006;      // Port ESP32 lắng nghe lệnh bật đèn
 
@@ -30,8 +30,8 @@ unsigned long lastTriggerTime2 = 0;
 const int triggerDelay = 2000; 
 
 // ================= ĐIỀN WIFI NHÀ BẠN =================
-const char *ssid = "NH K7 P408-2.4G"; 
-const char *password = "";            
+const char *ssid = "DuckHy"; 
+const char *password = "05022006";            
 // =====================================================
 
 // --- Thêm 2 biến này vào phần khai báo biến toàn cục ---
